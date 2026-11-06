@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { button, buttonGhost, input, label } from "@/lib/ui";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sent" | "error">("idle");
-  const expired =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("error") === "expired";
+  // サーバーでは false、ブラウザでは URL を読む（描画の食い違いを起こさない）
+  const expired = useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).get("error") === "expired",
+    () => false,
+  );
 
   async function google() {
     const supabase = createClient();

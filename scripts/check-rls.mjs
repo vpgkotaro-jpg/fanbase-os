@@ -28,7 +28,6 @@ expect("Aは自分の作者行を作れる", r.ok, r); const cA = r.rows?.[0]?.i
 r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'なりすまし','fake-a') returning id`, [A]);
 expect("BはAの名前で作者行を作れない", !r.ok, r);
 r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'Bさん','creator-b') returning id`, [B]);
-const cB = r.rows?.[0]?.id;
 r = await as("authenticated", A, `insert into communities (creator_id, name) values ($1,'Developers') returning id`, [cA]);
 expect("Aは自分のコミュニティを作れる", r.ok, r); const comA = r.rows?.[0]?.id;
 r = await as("authenticated", B, `insert into communities (creator_id, name) values ($1,'乗っ取り') returning id`, [cA]);
@@ -51,6 +50,10 @@ r = await as("anon", null, `select * from ideas`);
 expect("ログイン前の人は ideas 本体（メール欄つき）を読めない", !r.ok, r);
 r = await as("anon", null, `select * from ideas_public`);
 expect("AIの分類前の投稿は公開ビューに出ない", r.ok && r.rows.length === 0, r);
+
+const pre = (await as("postgres", null, `select id from ideas limit 1`)).rows[0].id;
+r = await as("anon", null, `insert into comments (idea_id, body) values ($1,'分類前への返信')`, [pre]);
+expect("AIの分類前の投稿には返信できない（idを知っていても）", !r.ok, r);
 
 // サーバー（service_role）がAIの結果を書く
 r = await as("service_role", null, `update ideas set ai_kind='project', ai_summary='週1の作業会の提案', ai_highlight=true, ai_highlight_reason='具体的' returning id`);

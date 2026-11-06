@@ -278,7 +278,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select exists (select 1 from public.ideas i where i.id = iid and i.ai_spam = false and i.ai_injection = false);
+  select exists (select 1 from public.ideas i where i.id = iid and i.ai_spam = false and i.ai_injection = false and i.ai_kind is not null);  -- 公開ビューに出ている投稿だけ（AI分類前は返信・応援できない）
 $$;
 
 create policy votes_fan_insert on public.votes

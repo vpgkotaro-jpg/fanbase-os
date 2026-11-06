@@ -25,3 +25,14 @@ export const TEMPLATES: Record<string, string> = {
   Music: "Musicians and listeners sharing songs, gigs, and collabs.",
   Fitness: "People sharing training, goals, and events.",
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// フォームから来た slug / id で戻り先を作る。形が違えば トップへ（外部サイトへのリダイレクトを防ぐ）。
+export function safePath(slug: unknown, communityId?: unknown): string {
+  const s = String(slug ?? "");
+  if (!SLUG_RE.test(s)) return "/";
+  if (communityId === undefined) return `/${s}`;
+  const c = String(communityId ?? "");
+  return UUID_RE.test(c) ? `/${s}/${c}` : `/${s}`;
+}

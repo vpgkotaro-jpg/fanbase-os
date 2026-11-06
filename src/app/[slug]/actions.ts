@@ -2,13 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { safePath } from "@/lib/ui";
 
 export async function joinCommunity(formData: FormData) {
   const slug = String(formData.get("slug"));
   const communityId = String(formData.get("community_id"));
   const name = String(formData.get("name") ?? "").trim().slice(0, 80);
   const email = String(formData.get("email") ?? "").trim().slice(0, 254);
-  const base = `/${slug}`;
+  const base = safePath(slug);
   if (!name && !email) redirect(`${base}?joinError=empty#join`);
   if (email && !/^[^\s@]+@[^\s@]+$/.test(email)) redirect(`${base}?joinError=email#join`);
 

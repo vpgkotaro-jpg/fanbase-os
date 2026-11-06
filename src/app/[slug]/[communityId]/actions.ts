@@ -2,9 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { safePath } from "@/lib/ui";
 
 export async function postIdea(formData: FormData) {
-  const base = `/${String(formData.get("slug"))}/${String(formData.get("community_id"))}`;
+  const base = safePath(formData.get("slug"), formData.get("community_id"));
   const body = String(formData.get("body") ?? "").trim();
   const name = String(formData.get("author_name") ?? "").trim().slice(0, 60);
   if (!body) redirect(`${base}?postError=empty#post`);
@@ -22,7 +23,7 @@ export async function postIdea(formData: FormData) {
 }
 
 export async function postReply(formData: FormData) {
-  const base = `/${String(formData.get("slug"))}/${String(formData.get("community_id"))}`;
+  const base = safePath(formData.get("slug"), formData.get("community_id"));
   const ideaId = String(formData.get("idea_id"));
   const body = String(formData.get("body") ?? "").trim();
   const name = String(formData.get("author_name") ?? "").trim().slice(0, 60);
