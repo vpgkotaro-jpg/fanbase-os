@@ -1,5 +1,5 @@
-// supabase/schema.sql をローカルの PGlite（Postgres）で流して、構文と RLS の基本を確かめる。
-// Supabase 固有の部分（auth.users, auth.uid(), anon/authenticated ロール）は最小限の代役を作る。
+// Run supabase/schema.sql on a local PGlite (Postgres) to check syntax and basic RLS.
+// Supabase-specific parts (auth.users, auth.uid(), anon/authenticated roles) get minimal stand-ins.
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { readFileSync } from "node:fs";

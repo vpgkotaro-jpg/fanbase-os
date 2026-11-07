@@ -28,7 +28,7 @@ export const TEMPLATES: Record<string, string> = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// フォームから来た slug / id で戻り先を作る。形が違えば トップへ（外部サイトへのリダイレクトを防ぐ）。
+// Build the return path from the slug / id submitted by the form. If the shape is invalid, go to the top page (prevents redirects to external sites).
 export function safePath(slug: unknown, communityId?: unknown): string {
   const s = String(slug ?? "");
   if (!SLUG_RE.test(s)) return "/";

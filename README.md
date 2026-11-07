@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Fanbase OS
 
-## Getting Started
+A home base for a creator's community. A creator signs in, picks community templates, and shares one link. Fans join, post ideas and projects, and reply to each other. AI sorts the posts so the creator sees what matters, and the creator turns a chosen idea into an announcement.
 
-First, run the development server:
+Built for the Startupathon assignment "Build the Operating System for Fanbases".
+
+## Status
+
+Work in progress. Done so far:
+
+- Sign in with Google or an email link (Supabase Auth)
+- Onboarding: name, public URL, communities from templates (Developers, Designers, Investors, Music, Fitness), optional AI preferences
+- Creator dashboard: own communities and recent posts
+- Public creator page `/{slug}` with a join form
+- Community page `/{slug}/{communityId}`: post an idea or project, read and reply
+- Database schema with row-level security, checked locally (see below)
+
+Next: AI classification and one-line summaries for incoming posts, highlights with a reason, then turning a selected post into an announcement.
+
+## Stack
+
+Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth, RLS). Deployment target: Vercel (not deployed yet).
+
+## Run locally
 
 ```bash
+npm install
+cp .env.example .env.local   # fill in your Supabase project URL and anon key
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Apply `supabase/schema.sql` to your Supabase project (SQL Editor) before signing in.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Checks
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run check:schema   # runs supabase/schema.sql on a local Postgres (PGlite) with small stand-ins for Supabase auth
+npm run check:rls      # switches between guest, creator A, creator B and server roles and checks who can read or write what
+```
 
-## Learn More
+The RLS checks cover, among others: a user cannot create a creator profile for someone else; guests cannot read members, AI preferences or the raw posts table (which holds emails); guests cannot fill AI fields themselves; a post is public only after it is classified; unpublished announcements stay hidden.
 
-To learn more about Next.js, take a look at the following resources:
+## Data and privacy
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Fans can post without an account. The raw `ideas` table is readable only by the community owner; the public sees the `ideas_public` view, which leaves out email and AI-internal fields.
+- AI results are written only from the server. Keys stay in `.env.local` and are never committed.

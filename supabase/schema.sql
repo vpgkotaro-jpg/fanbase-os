@@ -1,25 +1,25 @@
--- Startupathon 用 Supabase (Postgres) スキーマ。準備と計画.md 2-3 に対応。
--- 状態：構文確認は未実行（手元に Postgres が無いため）。Supabase の SQL Editor で流すときにエラーが出たら、その行を直す。
--- 前提：Supabase の auth.users と auth.uid() を使う。Postgres 15 以上を想定。
+-- Supabase (Postgres) schema for Startupathon. Matches section 2-3 of the plan doc.
+-- Status: syntax not yet verified (no local Postgres). If running this in the Supabase SQL Editor raises an error, fix that line.
+-- Assumes: uses Supabase auth.users and auth.uid(); Postgres 15 or later.
 --
--- 計画書 2-3 からの追加（理由つき）
---   ideas.ai_community_id : AIが選んだコミュニティ。fanが投稿時に選んだ community_id とは別に持つ
---   ideas.ai_spam / ai_injection : スパム・命令文混入の目印。ファン向け公開ビューから外すため
---   idea_groups.community_id : まとまりの所属を引けるように（任意）
---   announcements.published_at は NULL = 下書き
---   inbox_messages（2026-11-01 追加）: DM 貼り付けの受信箱。1回目の提出では使わない（計画書 2-1）。idea_groups と votes も同じ
---   creator_settings（2026-11-01 追加）: AI に伝える好み。creators は全員が読めるので分けた
---   ideas.ai_highlight / ai_highlight_reason（2026-11-01 追加）: 注目の印と理由。公開ビューには出さない
---   comments（2026-11-01 追加）: メンバー同士の返信
---   announcements.idea_id（2026-11-01 追加）: 1回目はまとまりを作らないので、選んだ投稿に直接つなぐ
---   members（2026-11-01 追加）: 課題の「フォロワーをコミュニティに整理する」用。計画書 2-1 の 2
+-- Additions to plan section 2-3 (with reasons)
+--   ideas.ai_community_id : the community the AI chose; kept separate from the community_id the fan picked when posting
+--   ideas.ai_spam / ai_injection : flags for spam / injected instructions; used to exclude rows from the fan-facing public view
+--   idea_groups.community_id : lets us look up which community a group belongs to (optional)
+--   announcements.published_at: NULL = draft
+--   inbox_messages (added 2026-11-01): inbox for pasted DMs. Not used in the first submission (plan 2-1); same for idea_groups and votes
+--   creator_settings (added 2026-11-01): preferences passed to the AI. Split out because everyone can read creators
+--   ideas.ai_highlight / ai_highlight_reason (added 2026-11-01): highlight flag and reason. Not exposed in the public view
+--   comments (added 2026-11-01): replies between members
+--   announcements.idea_id (added 2026-11-01): the first release creates no groups, so link directly to the chosen post
+--   members (added 2026-11-01): for the task "organize followers into communities". Plan 2-1, item 2
 --
--- AIの結果の書き込みは、サーバー側（service_role キー）から行う。service_role キーはブラウザに出さない。
+-- AI results are written from the server side (service_role key). Never expose the service_role key to the browser.
 
 create extension if not exists pgcrypto;
 
 -- ------------------------------------------------------------
--- 表
+-- Tables
 -- ------------------------------------------------------------
 
 create table public.creators (
@@ -83,7 +83,7 @@ create table public.announcements (
   idea_group_id  uuid references public.idea_groups (id) on delete set null,
   title          text check (char_length(title) <= 100),
   body           text not null check (char_length(body) between 1 and 3000),
-  published_at   timestamptz,           -- NULL は下書き
+  published_at   timestamptz,           -- NULL means draft
   created_at     timestamptz not null default now()
 );
 
@@ -117,7 +117,7 @@ create table public.inbox_messages (
 );
 
 -- ------------------------------------------------------------
--- インデックス（外部キーと一覧の並び順に使うもの）
+-- Indexes (for foreign keys and list ordering)
 -- ------------------------------------------------------------
 
 create index communities_creator_idx    on public.communities (creator_id);
@@ -129,10 +129,10 @@ create index idea_groups_creator_idx    on public.idea_groups (creator_id);
 create index announcements_creator_pub_idx on public.announcements (creator_id, published_at desc);
 create index announcements_group_idx    on public.announcements (idea_group_id);
 create index usage_events_creator_created_idx on public.usage_events (creator_id, created_at desc);
--- votes は UNIQUE (idea_id, device_id) が idea_id の索引を兼ねる
+-- votes: UNIQUE (idea_id, device_id) also serves as the idea_id index
 
 -- ------------------------------------------------------------
--- 賛成数の自動更新（ファンは ideas を更新できないので、トリガーで増減）
+-- Automatic vote count updates (fans cannot update ideas, so a trigger increments/decrements)
 -- ------------------------------------------------------------
 
 create or replace function public.bump_vote_count()
@@ -156,9 +156,9 @@ after insert or delete on public.votes
 for each row execute function public.bump_vote_count();
 
 -- ------------------------------------------------------------
--- 公開用ビュー（メール欄と内部のAIフラグを含めない）
--- ビューの所有者権限で読むので、ideas の RLS を通らずにファンへ見せられる。
--- Supabase の Security Advisor が「SECURITY DEFINER ビュー」と警告する場合があるが、意図したもの。
+-- Public view (excludes the email column and internal AI flags)
+-- It reads with the view owner's privileges, so it can show rows to fans without going through ideas RLS.
+-- Supabase's Security Advisor may warn about a "SECURITY DEFINER view"; this is intentional.
 -- ------------------------------------------------------------
 
 create view public.ideas_public as
@@ -176,7 +176,7 @@ select
 from public.ideas i
 where i.ai_spam = false
   and i.ai_injection = false
-  and i.ai_kind is not null;  -- AIの分類が済むまでは公開しない（スパムが一瞬でも出ないように）
+  and i.ai_kind is not null;  -- not public until AI classification is done (so spam never shows even briefly)
 
 -- ------------------------------------------------------------
 -- RLS
@@ -190,7 +190,7 @@ alter table public.votes          enable row level security;
 alter table public.announcements  enable row level security;
 alter table public.usage_events   enable row level security;
 
--- 自分の creators 行か
+-- whether it is the user's own creators row
 create or replace function public.owns_creator(cid uuid)
 returns boolean
 language sql
@@ -215,7 +215,7 @@ as $$
   );
 $$;
 
--- creators：公開情報はだれでも読める。書けるのは本人だけ
+-- creators: public info is readable by anyone. Only the owner can write
 create policy creators_public_read on public.creators
   for select to anon, authenticated using (true);
 create policy creators_owner_insert on public.creators
@@ -225,7 +225,7 @@ create policy creators_owner_update on public.creators
 create policy creators_owner_delete on public.creators
   for delete to authenticated using (user_id = auth.uid());
 
--- communities：読むのはだれでも。書けるのは持ち主だけ
+-- communities: anyone can read. Only the owner can write
 create policy communities_public_read on public.communities
   for select to anon, authenticated using (true);
 create policy communities_owner_insert on public.communities
@@ -235,8 +235,8 @@ create policy communities_owner_update on public.communities
 create policy communities_owner_delete on public.communities
   for delete to authenticated using (public.owns_creator(creator_id));
 
--- ideas：ファンは投稿（insert）だけ。読むのは ideas_public ビュー経由
--- 投稿時に AI の欄や賛成数を勝手に入れられないよう、初期値だけを許す
+-- ideas: fans can only post (insert). Reads go through the ideas_public view
+-- Allow only initial values so fans cannot set AI columns or vote counts when posting
 create policy ideas_fan_insert on public.ideas
   for insert to anon, authenticated
   with check (
@@ -251,7 +251,7 @@ create policy ideas_fan_insert on public.ideas
     and ai_highlight_reason is null
     and group_id is null
   );
--- クリエイターは自分のコミュニティ宛ての行を読み・更新・削除できる（メールもここで読める）
+-- Creators can read, update, and delete rows addressed to their own communities (emails are readable here too)
 create policy ideas_owner_read on public.ideas
   for select to authenticated using (public.owns_community(community_id));
 create policy ideas_owner_update on public.ideas
@@ -259,18 +259,18 @@ create policy ideas_owner_update on public.ideas
 create policy ideas_owner_delete on public.ideas
   for delete to authenticated using (public.owns_community(community_id));
 
--- anon には ideas の読み取り権限そのものを与えない（ポリシーが無くても、二重の安全として）
+-- anon is not granted read privilege on ideas at all (double safety, even without a policy)
 revoke select on public.ideas from anon;
 grant select on public.ideas_public to anon, authenticated;
--- 注意：ファンの投稿は insert のみ。supabase-js では .insert(...) の後に .select() を付けない
--- （付けると RETURNING が select 権限を要求して失敗する）。
+-- Note: fan posts are insert-only. In supabase-js, do not chain .select() after .insert(...)
+-- (doing so makes RETURNING require select privilege and fail).
 
--- idea_groups：クリエイターだけ
+-- idea_groups: creators only
 create policy idea_groups_owner_all on public.idea_groups
   for all to authenticated using (public.owns_creator(creator_id)) with check (public.owns_creator(creator_id));
 
--- votes：ファンは賛成の追加だけ。読めない（端末識別を見せない）。重複は UNIQUE が止める
--- ファンは ideas を読めないので、存在確認は所有者権限の関数で行う
+-- votes: fans can only add votes. They cannot read them (device IDs stay hidden). Duplicates are blocked by UNIQUE
+-- Fans cannot read ideas, so existence checks use a function with owner privileges
 create or replace function public.idea_is_votable(iid uuid)
 returns boolean
 language sql
@@ -278,7 +278,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select exists (select 1 from public.ideas i where i.id = iid and i.ai_spam = false and i.ai_injection = false and i.ai_kind is not null);  -- 公開ビューに出ている投稿だけ（AI分類前は返信・応援できない）
+  select exists (select 1 from public.ideas i where i.id = iid and i.ai_spam = false and i.ai_injection = false and i.ai_kind is not null);  -- only posts visible in the public view (no replies or votes before AI classification)
 $$;
 
 create policy votes_fan_insert on public.votes
@@ -290,31 +290,31 @@ create policy votes_owner_read on public.votes
   );
 revoke select on public.votes from anon;
 
--- announcements：公開済みだけ全員が読める。下書きと編集は持ち主だけ
+-- announcements: only published ones are readable by everyone. Drafts and edits are owner-only
 create policy announcements_public_read on public.announcements
   for select to anon, authenticated using (published_at is not null);
 create policy announcements_owner_all on public.announcements
   for all to authenticated using (public.owns_creator(creator_id)) with check (public.owns_creator(creator_id));
 
--- usage_events：自分の分だけ読み書き。ファンには見せない
+-- usage_events: read/write only your own. Not shown to fans
 create policy usage_events_owner_read on public.usage_events
   for select to authenticated using (public.owns_creator(creator_id));
 create policy usage_events_owner_insert on public.usage_events
   for insert to authenticated with check (public.owns_creator(creator_id));
 
--- 想定外の経路で anon / authenticated に付く既定権限を狭める（RLS と二重で守る）
+-- Narrow default privileges that anon / authenticated may receive via unexpected paths (double protection with RLS)
 revoke all on public.usage_events from anon;
 revoke all on public.idea_groups from anon;
 
--- inbox_messages：クリエイター本人だけ。ファンからは読めない
+-- inbox_messages: the creator only. Not readable by fans
 create index inbox_messages_creator_created_idx on public.inbox_messages (creator_id, created_at desc);
 alter table public.inbox_messages enable row level security;
 create policy inbox_messages_owner_all on public.inbox_messages
   for all to authenticated using (public.owns_creator(creator_id)) with check (public.owns_creator(creator_id));
 revoke all on public.inbox_messages from anon;
 
--- members：ファンは参加（insert）だけ。読めるのはクリエイターだけ（メールを見せない）
--- 同じメールでの再参加は UNIQUE で止まる。アプリ側は 23505 を「参加済み」として成功扱いにし、エラーを見せない
+-- members: fans can only join (insert). Only creators can read (emails stay hidden)
+-- Rejoining with the same email is blocked by UNIQUE. The app treats 23505 as "already joined" and succeeds without showing an error
 create unique index members_community_email_key on public.members (community_id, lower(email)) where email is not null;
 create index members_community_created_idx on public.members (community_id, created_at desc);
 alter table public.members enable row level security;
@@ -328,7 +328,7 @@ create policy members_owner_delete on public.members
   for delete to authenticated using (public.owns_community(community_id));
 revoke select on public.members from anon;
 
--- creator_settings：クリエイター本人だけ。ファンからは読めない
+-- creator_settings: the creator only. Not readable by fans
 create table public.creator_settings (
   creator_id     uuid primary key references public.creators (id) on delete cascade,
   ai_preferences text check (char_length(ai_preferences) <= 500),
@@ -339,9 +339,9 @@ create policy creator_settings_owner_all on public.creator_settings
   for all to authenticated using (public.owns_creator(creator_id)) with check (public.owns_creator(creator_id));
 revoke all on public.creator_settings from anon;
 
--- comments：メンバー同士の返信。ログインなしで書けて、だれでも読める。メール欄は持たない
--- idea_is_votable は「スパムや命令文の印が付いていない投稿か」の判定なので、賛成と共用する
--- 消せるのは投稿先コミュニティのクリエイターだけ。書き換えはだれにも許さない
+-- comments: replies between members. Writable without login, readable by anyone. No email column
+-- idea_is_votable checks "is the post free of spam / injection flags", so it is shared with votes
+-- Only the creator of the target community can delete. Nobody may edit
 create table public.comments (
   id           uuid primary key default gen_random_uuid(),
   idea_id      uuid not null references public.ideas (id) on delete cascade,

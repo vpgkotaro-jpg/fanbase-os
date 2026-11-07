@@ -1,4 +1,4 @@
-// RLS（行ごとの見え方）の確認。check-schema.mjs と同じ代役の上で、ログイン前の人・作者A・作者B・サーバーの立場を切り替えて試す。
+// Check RLS (row-level visibility). On the same stand-in as check-schema.mjs, switch between logged-out user, creator A, creator B, and server roles and try operations.
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { readFileSync } from "node:fs";
@@ -22,84 +22,84 @@ async function as(role, uid, q, params = []) {
 let fails = 0;
 function expect(name, cond, detail) { console.log(`${cond ? "OK  " : "NG  "} ${name}${cond ? "" : "  -> " + JSON.stringify(detail)}`); if (!cond) fails++; }
 
-// 作者A：作者・コミュニティ・設定を作る
-let r = await as("authenticated", A, `insert into creators (user_id, display_name, slug) values ($1,'Aさん','creator-a') returning id`, [A]);
-expect("Aは自分の作者行を作れる", r.ok, r); const cA = r.rows?.[0]?.id;
-r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'なりすまし','fake-a') returning id`, [A]);
-expect("BはAの名前で作者行を作れない", !r.ok, r);
-r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'Bさん','creator-b') returning id`, [B]);
+// Creator A: creates creator, community, and settings
+let r = await as("authenticated", A, `insert into creators (user_id, display_name, slug) values ($1,'Creator A','creator-a') returning id`, [A]);
+expect("A can create their own creator row", r.ok, r); const cA = r.rows?.[0]?.id;
+r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'impersonator','fake-a') returning id`, [A]);
+expect("B cannot create a creator row for A's user_id", !r.ok, r);
+r = await as("authenticated", B, `insert into creators (user_id, display_name, slug) values ($1,'Creator B','creator-b') returning id`, [B]);
 r = await as("authenticated", A, `insert into communities (creator_id, name) values ($1,'Developers') returning id`, [cA]);
-expect("Aは自分のコミュニティを作れる", r.ok, r); const comA = r.rows?.[0]?.id;
-r = await as("authenticated", B, `insert into communities (creator_id, name) values ($1,'乗っ取り') returning id`, [cA]);
-expect("BはAのコミュニティを作れない", !r.ok, r);
-r = await as("authenticated", A, `insert into creator_settings (creator_id, ai_preferences) values ($1,'具体的な提案を優先')`, [cA]);
-expect("AはAI設定を保存できる", r.ok, r);
+expect("A can create their own community", r.ok, r); const comA = r.rows?.[0]?.id;
+r = await as("authenticated", B, `insert into communities (creator_id, name) values ($1,'hijack') returning id`, [cA]);
+expect("B cannot create a community for A", !r.ok, r);
+r = await as("authenticated", A, `insert into creator_settings (creator_id, ai_preferences) values ($1,'Prefer concrete proposals')`, [cA]);
+expect("A can save AI settings", r.ok, r);
 r = await as("anon", null, `select * from creator_settings`);
-expect("ログイン前の人はAI設定を読めない", !r.ok || r.rows.length === 0, r);
+expect("Logged-out users cannot read AI settings", !r.ok || r.rows.length === 0, r);
 r = await as("authenticated", B, `select * from creator_settings`);
-expect("BはAのAI設定を読めない", r.ok && r.rows.length === 0, r);
+expect("B cannot read A's AI settings", r.ok && r.rows.length === 0, r);
 
-// ファン（ログイン前）：投稿
-r = await as("anon", null, `insert into ideas (community_id, author_name, body) values ($1,'fan1','Discordで週1の作業会をやりたい')`, [comA]);
-expect("ログイン前の人は投稿できる", r.ok, r);
-r = await as("anon", null, `insert into ideas (community_id, body, ai_highlight) values ($1,'自分で注目に入れる',true)`, [comA]);
-expect("ログイン前の人はAIの欄を自分で埋められない", !r.ok, r);
-r = await as("anon", null, `insert into ideas (community_id, body, ai_kind) values ($1,'自分で分類','idea')`, [comA]);
-expect("ログイン前の人はAI分類を自分で付けられない", !r.ok, r);
+// Fan (logged out): posting
+r = await as("anon", null, `insert into ideas (community_id, author_name, body) values ($1,'fan1','I want to run a weekly work session on Discord')`, [comA]);
+expect("Logged-out users can post", r.ok, r);
+r = await as("anon", null, `insert into ideas (community_id, body, ai_highlight) values ($1,'self-highlighted',true)`, [comA]);
+expect("Logged-out users cannot fill AI columns themselves", !r.ok, r);
+r = await as("anon", null, `insert into ideas (community_id, body, ai_kind) values ($1,'self-classified','idea')`, [comA]);
+expect("Logged-out users cannot set AI classification themselves", !r.ok, r);
 r = await as("anon", null, `select * from ideas`);
-expect("ログイン前の人は ideas 本体（メール欄つき）を読めない", !r.ok, r);
+expect("Logged-out users cannot read the ideas table itself (with email column)", !r.ok, r);
 r = await as("anon", null, `select * from ideas_public`);
-expect("AIの分類前の投稿は公開ビューに出ない", r.ok && r.rows.length === 0, r);
+expect("Posts not yet classified by AI do not appear in the public view", r.ok && r.rows.length === 0, r);
 
 const pre = (await as("postgres", null, `select id from ideas limit 1`)).rows[0].id;
-r = await as("anon", null, `insert into comments (idea_id, body) values ($1,'分類前への返信')`, [pre]);
-expect("AIの分類前の投稿には返信できない（idを知っていても）", !r.ok, r);
+r = await as("anon", null, `insert into comments (idea_id, body) values ($1,'reply before classification')`, [pre]);
+expect("Cannot reply to a post before AI classification (even knowing the id)", !r.ok, r);
 
-// サーバー（service_role）がAIの結果を書く
-r = await as("service_role", null, `update ideas set ai_kind='project', ai_summary='週1の作業会の提案', ai_highlight=true, ai_highlight_reason='具体的' returning id`);
-expect("サーバーはAIの結果を書ける", r.ok && r.rows.length === 1, r);
+// Server (service_role) writes the AI result
+r = await as("service_role", null, `update ideas set ai_kind='project', ai_summary='Proposal for a weekly work session', ai_highlight=true, ai_highlight_reason='concrete' returning id`);
+expect("Server can write AI results", r.ok && r.rows.length === 1, r);
 r = await as("anon", null, `select * from ideas_public`);
-expect("分類後は公開ビューに出る", r.ok && r.rows.length === 1, r);
-expect("公開ビューにメールと注目理由の列がない", r.ok && !("email" in r.rows[0]) && !("ai_highlight_reason" in r.rows[0]), r.rows?.[0]);
+expect("After classification it appears in the public view", r.ok && r.rows.length === 1, r);
+expect("Public view has no email or highlight-reason columns", r.ok && !("email" in r.rows[0]) && !("ai_highlight_reason" in r.rows[0]), r.rows?.[0]);
 const ideaId = r.rows?.[0]?.id;
 
-// 作者の受信箱
+// Creator's inbox
 r = await as("authenticated", A, `select id, ai_highlight from ideas`);
-expect("Aは自分のコミュニティの投稿を読める", r.ok && r.rows.length === 1, r);
+expect("A can read posts in their own community", r.ok && r.rows.length === 1, r);
 r = await as("authenticated", B, `select id from ideas`);
-expect("BはAの投稿本体を読めない", r.ok && r.rows.length === 0, r);
+expect("B cannot read A's posts", r.ok && r.rows.length === 0, r);
 r = await as("authenticated", B, `update ideas set status='selected' returning id`);
-expect("BはAの投稿を変えられない", r.ok && r.rows.length === 0, r);
+expect("B cannot modify A's posts", r.ok && r.rows.length === 0, r);
 
-// 返信
-r = await as("anon", null, `insert into comments (idea_id, author_name, body) values ($1,'fan2','参加したい')`, [ideaId]);
-expect("ログイン前の人は公開済みの投稿に返信できる", r.ok, r);
+// Replies
+r = await as("anon", null, `insert into comments (idea_id, author_name, body) values ($1,'fan2','I want to join')`, [ideaId]);
+expect("Logged-out users can reply to published posts", r.ok, r);
 r = await as("anon", null, `select body from comments`);
-expect("返信は誰でも読める", r.ok && r.rows.length === 1, r);
+expect("Anyone can read replies", r.ok && r.rows.length === 1, r);
 await as("service_role", null, `update ideas set ai_spam=true where id=$1`, [ideaId]);
-r = await as("anon", null, `insert into comments (idea_id, body) values ($1,'スパムへの返信')`, [ideaId]);
-expect("スパム判定の投稿には返信できない", !r.ok, r);
+r = await as("anon", null, `insert into comments (idea_id, body) values ($1,'reply to spam')`, [ideaId]);
+expect("Cannot reply to a post flagged as spam", !r.ok, r);
 r = await as("anon", null, `select body from comments`);
-expect("スパム判定の投稿の返信は見えなくなる", r.ok && r.rows.length === 0, r);
+expect("Replies to spam-flagged posts become invisible", r.ok && r.rows.length === 0, r);
 
-// メンバー
+// Members
 r = await as("anon", null, `insert into members (community_id, display_name) values ($1,'fan1')`, [comA]);
-expect("ログイン前の人はコミュニティに参加できる", r.ok, r);
+expect("Logged-out users can join a community", r.ok, r);
 r = await as("anon", null, `select * from members`);
-expect("ログイン前の人はメンバー一覧を読めない", !r.ok || r.rows.length === 0, r);
+expect("Logged-out users cannot read the member list", !r.ok || r.rows.length === 0, r);
 r = await as("authenticated", A, `select display_name from members`);
-expect("Aは自分のメンバーを読める", r.ok && r.rows.length === 1, r);
+expect("A can read their own members", r.ok && r.rows.length === 1, r);
 
-// 告知
-r = await as("authenticated", A, `insert into announcements (creator_id, title, body) values ($1,'下書き','本文') returning id`, [cA]);
-expect("Aは告知の下書きを作れる", r.ok, r); const ann = r.rows?.[0]?.id;
+// Announcements
+r = await as("authenticated", A, `insert into announcements (creator_id, title, body) values ($1,'Draft','Body') returning id`, [cA]);
+expect("A can create an announcement draft", r.ok, r); const ann = r.rows?.[0]?.id;
 r = await as("anon", null, `select * from announcements`);
-expect("下書きはログイン前の人に見えない", r.ok && r.rows.length === 0, r);
+expect("Drafts are invisible to logged-out users", r.ok && r.rows.length === 0, r);
 await as("authenticated", A, `update announcements set published_at=now() where id=$1`, [ann]);
 r = await as("anon", null, `select title from announcements`);
-expect("公開した告知は見える", r.ok && r.rows.length === 1, r);
-r = await as("authenticated", B, `update announcements set body='改ざん' where id=$1 returning id`, [ann]);
-expect("BはAの告知を変えられない", r.ok && r.rows.length === 0, r);
+expect("Published announcements are visible", r.ok && r.rows.length === 1, r);
+r = await as("authenticated", B, `update announcements set body='tampered' where id=$1 returning id`, [ann]);
+expect("B cannot modify A's announcements", r.ok && r.rows.length === 0, r);
 
-console.log(fails ? `\n${fails} 件 NG` : "\nすべて OK");
+console.log(fails ? `\n${fails} NG` : "\nAll OK");
 process.exit(fails ? 1 : 0);

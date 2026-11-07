@@ -7,7 +7,7 @@ import { button, buttonGhost, input, label } from "@/lib/ui";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sent" | "error">("idle");
-  // サーバーでは false、ブラウザでは URL を読む（描画の食い違いを起こさない）
+  // false on the server, reads the URL in the browser (avoids a hydration mismatch)
   const expired = useSyncExternalStore(
     () => () => {},
     () => new URLSearchParams(window.location.search).get("error") === "expired",
