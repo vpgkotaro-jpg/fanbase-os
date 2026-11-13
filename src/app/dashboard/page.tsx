@@ -2,9 +2,18 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { buttonGhost, card, KIND_LABEL } from "@/lib/ui";
+import { button, buttonGhost, card, input, KIND_LABEL } from "@/lib/ui";
+import { draftFromIdea, saveAnnouncement } from "./actions";
 
-async function Content() {
+const ERRORS: Record<string, string> = {
+  ai: "The AI draft is not available right now. Try again later.",
+  failed: "That did not work. Please try again.",
+  body: "The announcement text must be between 1 and 3000 characters.",
+};
+
+async function Content({ searchParams }: { searchParams: Promise<{ [k: string]: string | string[] | undefined }> }) {
+  const sp = await searchParams;
+  const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) redirect("/login");
@@ -28,6 +37,17 @@ async function Content() {
     )
     .order("created_at", { ascending: false })
     .limit(20);
+
+  const { data: announcements } = await supabase
+    .from("announcements")
+    .select("id, idea_id, title, body, published_at")
+    .eq("creator_id", creator.id)
+    .order("created_at", { ascending: false });
+  const drafts = (announcements ?? []).filter((a) => !a.published_at);
+  const published = (announcements ?? []).filter((a) => a.published_at);
+  const hasAnnouncement = new Set((announcements ?? []).map((a) => a.idea_id));
+  // Highlighted posts first, then newest.
+  const sorted = [...(ideas ?? [])].sort((a, b) => Number(b.ai_highlight) - Number(a.ai_highlight));
 
   const communityName = new Map((communities ?? []).map((c) => [c.id, c.name]));
   const hasCommunities = (communities?.length ?? 0) > 0;
@@ -71,6 +91,38 @@ async function Content() {
         ))}
       </section>
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <section id="announcements" className="space-y-3">
+        <h2 className="font-semibold">Announcements</h2>
+        {!announcements?.length && (
+          <p className="text-sm text-neutral-600">
+            No announcements yet. Use &quot;Draft announcement&quot; on a post below.
+          </p>
+        )}
+        {drafts.map((a) => (
+          <form key={a.id} id={`ann-${a.id}`} action={saveAnnouncement} className={`${card} space-y-2`}>
+            <p className="text-xs text-neutral-500">Draft. Only you can see it.</p>
+            <input type="hidden" name="id" value={a.id} />
+            <input name="title" defaultValue={a.title ?? ""} maxLength={100} aria-label="Title" className={input} />
+            <textarea name="body" defaultValue={a.body} rows={5} maxLength={3000} aria-label="Announcement text" className={input} />
+            <div className="flex gap-2">
+              <button type="submit" name="intent" value="save" className={buttonGhost}>Save draft</button>
+              <button type="submit" name="intent" value="publish" className={button}>Publish</button>
+            </div>
+          </form>
+        ))}
+        {published.map((a) => (
+          <article key={a.id} className={`${card} space-y-1`}>
+            <p className="text-xs text-neutral-500">
+              Published {new Date(a.published_at!).toLocaleDateString("en")}
+            </p>
+            {a.title && <p className="font-medium">{a.title}</p>}
+            <p className="whitespace-pre-wrap text-sm">{a.body}</p>
+          </article>
+        ))}
+      </section>
+
       <section className="space-y-3">
         <h2 className="font-semibold">Recent ideas</h2>
         {!hasIdeas && (
@@ -78,22 +130,37 @@ async function Content() {
             Nothing received yet. Share your page link and ideas will arrive here.
           </p>
         )}
-        {ideas?.map((i) => (
-          <article key={i.id} className={`${card} space-y-1`}>
+        {sorted.map((i) => (
+          <article key={i.id} id={`idea-${i.id}`} className={`${card} space-y-1`}>
             <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
               <span>{communityName.get(i.community_id) ?? ""}</span>
-              <span>{i.ai_kind ? KIND_LABEL[i.ai_kind] : "Not sorted yet"}</span>
+              <span>{i.ai_kind ? KIND_LABEL[i.ai_kind] : "Sorting..."}</span>
               {i.ai_highlight && <span className="font-medium text-amber-700">Highlight</span>}
               {i.ai_spam && <span className="text-red-600">Possible spam</span>}
               {i.ai_injection && <span className="text-red-600">Contains instructions aimed at AI</span>}
               <span>{new Date(i.created_at).toLocaleDateString("en")}</span>
             </div>
-            {i.ai_summary && <p className="text-sm font-medium">{i.ai_summary}</p>}
+            {i.ai_kind && (
+              <p className="text-sm font-medium">{i.ai_summary || "Unclassified"}</p>
+            )}
             {i.ai_highlight_reason && (
               <p className="text-xs text-neutral-600">Why: {i.ai_highlight_reason}</p>
             )}
             <p className="whitespace-pre-wrap text-sm">{i.body}</p>
             {i.author_name && <p className="text-xs text-neutral-500">by {i.author_name}</p>}
+            {!hasAnnouncement.has(i.id) && !i.ai_spam && !i.ai_injection && (
+              <form action={draftFromIdea} className="flex flex-wrap items-center gap-2 pt-1">
+                <input type="hidden" name="idea_id" value={i.id} />
+                <input
+                  name="plan_note"
+                  maxLength={300}
+                  placeholder="Next step (optional)"
+                  aria-label="Next step (optional)"
+                  className={`${input} max-w-xs`}
+                />
+                <button type="submit" className={buttonGhost}>Draft announcement</button>
+              </form>
+            )}
           </article>
         ))}
       </section>
@@ -101,10 +168,10 @@ async function Content() {
   );
 }
 
-export default function DashboardPage() {
+export default function DashboardPage(props: PageProps<"/dashboard">) {
   return (
     <Suspense fallback={<p className="text-sm text-neutral-500">Loading...</p>}>
-      <Content />
+      <Content searchParams={props.searchParams} />
     </Suspense>
   );
 }

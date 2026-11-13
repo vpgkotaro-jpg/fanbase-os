@@ -29,6 +29,14 @@ async function Content({ params, searchParams }: PageProps<"/[slug]">) {
     .eq("creator_id", creator.id)
     .order("created_at");
 
+  // Published announcements only (RLS also hides drafts from the public).
+  const { data: announcements } = await supabase
+    .from("announcements")
+    .select("id, title, body, published_at")
+    .eq("creator_id", creator.id)
+    .not("published_at", "is", null)
+    .order("published_at", { ascending: false });
+
   const joinedId = typeof sp.joined === "string" ? sp.joined : undefined;
   const joined = communities?.find((c) => c.id === joinedId);
   const joinError = typeof sp.joinError === "string" ? JOIN_ERRORS[sp.joinError] : undefined;
@@ -39,6 +47,21 @@ async function Content({ params, searchParams }: PageProps<"/[slug]">) {
         <h1 className="text-3xl font-semibold">{creator.display_name}</h1>
         {creator.bio && <p className="whitespace-pre-wrap text-neutral-600">{creator.bio}</p>}
       </header>
+
+      {!!announcements?.length && (
+        <section className="space-y-3">
+          <h2 className="font-semibold">Announcements</h2>
+          {announcements.map((a) => (
+            <article key={a.id} className={`${card} space-y-1`}>
+              <p className="text-xs text-neutral-500">
+                {new Date(a.published_at!).toLocaleDateString("en")}
+              </p>
+              {a.title && <h3 className="font-medium">{a.title}</h3>}
+              <p className="whitespace-pre-wrap text-sm">{a.body}</p>
+            </article>
+          ))}
+        </section>
+      )}
 
       <section className="space-y-3">
         <h2 className="font-semibold">Communities</h2>
