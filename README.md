@@ -14,14 +14,16 @@ Work in progress. Done so far:
 - Public creator page `/{slug}` with a join form
 - Community page `/{slug}/{communityId}`: post an idea or project, read and reply
 - Database schema with row-level security, checked locally (see below)
-- AI sorting of new posts (kind, one-line summary, spam and prompt-injection flags, highlight with a reason), run on the server after a post is saved. Code is written but not yet tried against a live model or a live Supabase project.
+- AI sorting of new posts (kind, one-line summary, spam and prompt-injection flags, highlight with a reason), run on the server after a post is saved. Running on the live deployment.
 - Dashboard: posts show kind, summary and highlights; "Draft announcement" asks the AI for a draft, the creator edits it and publishes. Published announcements appear on `/{slug}`.
 
-Not done: deployment, votes and grouping of similar posts, email delivery. If the AI call fails, a post is saved as "Other" with an empty summary and shows as "Unclassified". If `SUPABASE_SERVICE_ROLE_KEY` is missing, new posts are not classified and stay hidden from the public.
+Live demo: https://fanbase-os-beta.vercel.app (public page: /demo).
+
+Not done: votes and grouping of similar posts, email delivery. If the AI call fails, a post is saved as "Other" with an empty summary and shows as "Unclassified". If `SUPABASE_SERVICE_ROLE_KEY` is missing, new posts are not classified and stay hidden from the public.
 
 ## Stack
 
-Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth, RLS). Deployment target: Vercel (not deployed yet).
+Next.js (App Router, TypeScript), Tailwind CSS, Supabase (Postgres, Auth, RLS). Deployed on Vercel.
 
 ## Run locally
 
